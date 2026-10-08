@@ -380,7 +380,7 @@ func (d *EVMDownloaderImplementation) GetLogs(ctx context.Context, fromBlock, to
 func (d *EVMDownloaderImplementation) GetBlockHeader(ctx context.Context, blockNum uint64) (EVMBlockHeader, bool) {
 	attempts := 0
 	for {
-		header, err := d.ethClient.HeaderByNumber(ctx, new(big.Int).SetUint64(blockNum))
+		header, hash, err := etherman.HeaderWithHashByNumber(ctx, d.ethClient, new(big.Int).SetUint64(blockNum))
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				// context is canceled, we don't want to fatal on max attempts in this case
@@ -405,7 +405,7 @@ func (d *EVMDownloaderImplementation) GetBlockHeader(ctx context.Context, blockN
 		}
 		return EVMBlockHeader{
 			Num:        header.Number.Uint64(),
-			Hash:       header.Hash(),
+			Hash:       hash,
 			ParentHash: header.ParentHash,
 			Timestamp:  header.Time,
 		}, false

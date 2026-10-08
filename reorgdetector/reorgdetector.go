@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/0xPolygon/cdk/db"
+	"github.com/0xPolygon/cdk/etherman"
 	"github.com/0xPolygon/cdk/log"
 	"github.com/0xPolygon/cdk/reorgdetector/migrations"
 	"github.com/ethereum/go-ethereum"
@@ -123,15 +124,16 @@ func (rd *ReorgDetector) AddBlockToTrack(ctx context.Context, id string, num uin
 // Notifies subscribers if reorg has happened
 func (rd *ReorgDetector) detectReorgInTrackedList(ctx context.Context) error {
 	// Get the latest finalized block
-	lastFinalisedBlock, err := rd.client.HeaderByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
+	lastFinalisedBlock, lastFinalisedHash, err := etherman.HeaderWithHashByNumber(
+		ctx, rd.client, big.NewInt(int64(rpc.FinalizedBlockNumber)))
 	if err != nil {
 		return fmt.Errorf("failed to get the latest finalized block: %w", err)
 	}
 
 	var (
 		headersCacheLock sync.Mutex
-		headersCache     = map[uint64]*types.Header{
-			lastFinalisedBlock.Number.Uint64(): lastFinalisedBlock,
+		headersCache     = map[uint64]common.Hash{
+			lastFinalisedBlock.Number.Uint64(): lastFinalisedHash,
 		}
 		errGroup errgroup.Group
 	)
@@ -159,18 +161,19 @@ func (rd *ReorgDetector) detectReorgInTrackedList(ctx context.Context) error {
 				// Get the actual header from the network or from the cache
 				var err error
 				headersCacheLock.Lock()
-				currentHeader, ok := headersCache[hdr.Num]
-				if !ok || currentHeader == nil {
-					if currentHeader, err = rd.client.HeaderByNumber(ctx, new(big.Int).SetUint64(hdr.Num)); err != nil {
+				currentHash, ok := headersCache[hdr.Num]
+				if !ok {
+					if _, currentHash, err = etherman.HeaderWithHashByNumber(
+						ctx, rd.client, new(big.Int).SetUint64(hdr.Num)); err != nil {
 						headersCacheLock.Unlock()
 						return fmt.Errorf("failed to get the header %d: %w", hdr.Num, err)
 					}
-					headersCache[hdr.Num] = currentHeader
+					headersCache[hdr.Num] = currentHash
 				}
 				headersCacheLock.Unlock()
 
 				// Check if the block hash matches with the actual block hash
-				if hdr.Hash == currentHeader.Hash() {
+				if hdr.Hash == currentHash {
 					// Delete block from the tracked blocks list if it is less than or equal to the last finalized block
 					// and hashes matches. If higher than finalized block, we assume a reorg still might happen.
 					if hdr.Num <= lastFinalisedBlock.Number.Uint64() {
